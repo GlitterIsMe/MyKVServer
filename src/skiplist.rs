@@ -1,4 +1,5 @@
-mod node;
+// don't look this, shit skiplist, shit linklist
+/* mod node;
 use node::*;
 use random::Source;
 
@@ -121,4 +122,4 @@ impl Skiplist{
         let mut source = random::default().seed([0, MAX_HEIGHT()]);
         source.read::<u16>()
     }
-}
+} */

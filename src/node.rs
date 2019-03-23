@@ -1,4 +1,4 @@
-pub const fn MAX_LENGTH() -> u16{
+/* pub const fn MAX_LENGTH() -> u16{
     4
 }
 
@@ -46,4 +46,4 @@ impl Node {
     pub fn value() -> &str{
         data.value_
     }
-}
+} */

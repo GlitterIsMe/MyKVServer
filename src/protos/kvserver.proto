@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package kvserver;
+
+service KVServer{
+    rpc Serve(Request) returns (Status) {}
+}
+
+enum OperationType{
+    INSERT = 0;
+    GET = 1;
+    DELETE = 2;
+    SCAN = 3;
+}
+
+enum ResultStatus{
+    kSuccess = 0;
+    kNotFound = 1;
+    kFailed = 2;
+}
+
+message Request{
+    required Type type = 1;
+    string key = 2;
+    optional string value = 3;
+}
+
+message Status{
+    required ResultStatus status = 0;
+    optional string value = 1;
+}
