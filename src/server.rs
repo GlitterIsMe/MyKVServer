@@ -11,30 +11,30 @@ use futures::sync::oneshot;
 use futures::Future;
 use grpcio::{Environment, RpcContext, ServerBuilder, UnarySink};
 
-use protos::kvserver::{Request, Status};
-use protos::kvserver_grpc::{self, KVServer};
+use protos::kvserver::{Request, Status, OperationType, ResultStatus};
+use protos::kvserver_grpc::{self, KvServer};
 
 #[derive(Clone)]
 struct KVServerService{
     kvmap: BTreeMap<String, String>,
     entry_num: u64,
-};
+}//struct声明后面不要分号
 
-impl KVServer for KVServerService{
-    fn Serve(&mut self, ctx: RpcContext, request: Request, sink: UnarySink<Status>){
+impl KvServer for KVServerService{
+    fn serve(&mut self, ctx: RpcContext, request: Request, sink: UnarySink<Status>){
         println!("get a kv item {:?}", request);
         let mut result = Status::new();
-        match request.type{
+        match request.opt{
             OperationType::INSERT =>{
                 self.kvmap.insert(request.key, request.value);
-                self.entry_num++;
+                self.entry_num += 1;// Rust没有++和--
                 result.set_status(ResultStatus::kSuccess);
             },
 
             OperationType::GET => {
                 result.set_status(ResultStatus::kNotFound);
                 if let Some(x) = self.kvmap.get(&request.key){
-                    result.set_value(String::from(x));// 返回一个String？
+                    result.set_value(x.to_string());// 返回一个String？
                     result.set_status(ResultStatus::kSuccess);
                 }
             },
@@ -43,7 +43,7 @@ impl KVServer for KVServerService{
                 result.set_status(ResultStatus::kNotFound);
                 if let Some(x) = self.kvmap.remove(&request.key){
                     result.set_status(ResultStatus::kSuccess);
-                    self.entry_num--;
+                    self.entry_num -= 1;
                 }
             },
 
@@ -61,9 +61,12 @@ impl KVServer for KVServerService{
 
 
 fn main(){
-    let env = Arc::new(Enviroment::new(1));
-    let service  = kvserver_grpc::create_kvserver(KVServerService);
-    let mut server = ServerBuild::new(env)
+    let env = Arc::new(Environment::new(1));
+    let service  = kvserver_grpc::create_kv_server(KVServerService{
+        kvmap: BTreeMap::new(),
+        entry_num: 0,
+    });//结构体在这里初始化，例子中的结构体是个单元结构体所以看起来像是直接用结构体名
+    let mut server = ServerBuilder::new(env)
         .register_service(service)
         .bind("127.0.0.1", 0)
         .build()

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package kvserver;
+package example;
 
 service KVServer{
     rpc Serve(Request) returns (Status) {}
@@ -20,12 +20,12 @@ enum ResultStatus{
 }
 
 message Request{
-    required Type type = 1;
-    string key = 2;
-    optional string value = 3;
+    OperationType opt = 1;// required field is not allowed in proto3
+    string key = 2;// optional lable is not used in proto3
+    string value = 3;
 }
 
 message Status{
-    required ResultStatus status = 0;
-    optional string value = 1;
+    ResultStatus status = 1; // field num must be positive numbers
+    string value = 2;
 }

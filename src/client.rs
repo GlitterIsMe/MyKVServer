@@ -5,8 +5,8 @@ use std::env;
 use std::sync::Arc;
 
 use grpcio::{ChannelBuilder, EnvBuilder};
-use protos::kvserver::{Request, Status};
-use protos::kvserver_grpc::KVServerClient;
+use protos::kvserver::{Request, Status, OperationType, ResultStatus};
+use protos::kvserver_grpc::KvServerClient;
 
 fn main(){
     let args = env::args().collect::<Vec<_>>();
@@ -19,11 +19,11 @@ fn main(){
 
     let env = Arc::new(EnvBuilder::new().build());
     let ch = ChannelBuilder::new(env).connect(format!("localhost:{}", port).as_str());
-    let client = KVServerClient::new(ch);
+    let client = KvServerClient::new(ch);
 
     let mut request = Request::new();
-    request.set_type(OperationType::INSERT);
-    request.set_key("foo");
+    request.set_opt(OperationType::INSERT);
+    request.set_key("foo".to_string());
 
-    let check = client.Serve(&request).expect("RPC Failed!");
+    let check = client.serve(&request).expect("RPC Failed!");
 }
