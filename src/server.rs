@@ -5,7 +5,7 @@ extern crate protos;
 use std::io::Read;
 use std::sync::Arc;
 use std::{io, thread};
-use std::collections::BTreeMap;
+//use std::collections::BTreeMap;
 
 use futures::sync::oneshot;
 use futures::Future;
@@ -14,10 +14,17 @@ use grpcio::{Environment, RpcContext, ServerBuilder, UnarySink};
 use protos::kvserver::{Request, Status, OperationType, ResultStatus};
 use protos::kvserver_grpc::{self, KvServer};
 
-#[derive(Clone)]
+use kvmap::MemIndex;
+use basic::DataType;
+
+#[derive(Debug,Clone)]
 struct KVServerService{
     kvmap: BTreeMap<String, String>,
     entry_num: u64,
+    mem_: Option<Box<MemIndex>>,
+    imm_: Option<Box<MemIndex>>,
+    need_flush_: bool,
+    need_compact_: bool,
 }//struct声明后面不要分号
 
 impl KvServer for KVServerService{
@@ -57,6 +64,78 @@ impl KvServer for KVServerService{
             }
         }
     }
+}
+
+impl KVServerService{
+    //basic operation
+    pub fn Put(&mut self, key: String, type: DataType, value：String) -> bool{
+        CheckForWriteSpace();
+        if let Some(x) = self.mem_{
+            x.Put(key, (type, value))
+        }
+        false
+    }
+
+    pub fn Get(&self, key: &str) -> Option(String){
+        // get from mem firstly
+        if let Some(x) = self.mem_{
+            x.Get(key)
+        }
+        // get from imm secondly
+        if let Some(x) = self.imm_{
+            x.Get(x)
+        }
+        // get from file
+
+    }
+
+    pub fn NewIter(&self) -> Iter<String, String>{
+
+    }
+
+    fn MaxBufferSize() -> u64{
+        4 * 1024 * 1024
+    }
+
+    fn CheckForWriteSpace(&mut self, size: u64){
+        // check whether the space in kvmap is enough
+        // or build a new kvmap and trigger flush
+        if let Some(x) = self.mem_{
+            if x.ApproximateUsage() < self.MaxBufferSize(){
+                //do nothing
+            }else{
+                match self.imm_{
+                    Some(x) => {
+                        // wait util flush finish
+                        // wait 
+                    },
+                    None =>,
+                }
+                SwitchKVMap();
+            }
+        }
+    }
+
+    fn SwitchKVMap(&mut self){
+        // build a new kvmap
+        // imm must be None now
+        match self.mem_{
+            Some(x) => {
+                self.imm_ = Some(x);
+                self.mem_ = Some(Box::new(MemIndex::new()));
+            },
+            None => println!("no mem currently");
+        }
+    }
+
+    fn BackgroundFlush(&mut self){
+        // get the imm and write it to file
+    }
+
+    fn BackgroundCompaction(&mut self){
+        
+    }
+
 }
 
 
