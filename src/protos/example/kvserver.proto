@@ -4,6 +4,8 @@ package example;
 
 service KVServer{
     rpc Serve(Request) returns (Status) {}
+
+    rpc GetTest(Request) returns (Status) {}
 }
 
 enum OperationType{
@@ -11,6 +13,7 @@ enum OperationType{
     GET = 1;
     DELETE = 2;
     SCAN = 3;
+    PERSIST = 4;
 }
 
 enum ResultStatus{

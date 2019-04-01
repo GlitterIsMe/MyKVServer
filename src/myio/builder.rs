@@ -8,30 +8,26 @@
  */
 use std::io::prelude::*;
 use std::fs::File;
+use std::fs::OpenOptions;
+use std::iter;
 
-use super::basic::DataType;
-
-pub fn BuildTable(iter: &Iter<String, (DataType, String)>, filename: &str){
-    let mut opened_file = File::create(filename)?;
+pub fn PersistToFile(iter: &Iterator<String, (bool, u64, String)>, persist_version: u64){
+    // 尝试打开log文件，如果失败则创建文件
+    let mut file = OpenOptions::new()
+                        .read(true)
+                        .append(true)
+                        .create(true)
+                        .open("persisted_data.log")?;
     let mut buffer = String::new();
-    let mut meta = String::new();
-    let mut off = 0;
-    let mut count = 0;
-    for (key, value) in iter{
-        let size = key.len() + value.1.len() + 1 + 4 * 2;
-        let mut kvitem = format!("{}{}{}{}{}", 
+    for (key, value) in iter.filter(|&(k,v)| !v.0){
+        let mut kvitem = format!("{},{},{},{},{},{},", 
         key.len() as u32, 
-        key, 
-        value.0 as u8,
-        value.1.len() as u32,
-        value.1);
-        buffer.psh_str(&kvitem);
-
-        let mut entry_meta = format!("{}{}{}", key, off, size);
-        meta.push_str(&entry_meta);
-        count += 1;
+        &key, 
+        true as u8,
+        persist_version as u64,
+        value.2.len() as u32,
+        &value.2);
+        buffer.push_str(&kvitem);
     }
-    buffer.push_str(&meta);
-    buffer.push_str(&format!("{}", count));
-    opened_file.write(buffer)?;
-}
+    file.write(buffer)?;
+} 

@@ -579,8 +579,9 @@ static file_descriptor_proto_data: &'static [u8] = b"\
     :\n\rOperationType\x12\n\n\x06INSERT\x10\0\x12\x07\n\x03GET\x10\x01\x12\
     \n\n\x06DELETE\x10\x02\x12\x08\n\x04SCAN\x10\x03*8\n\x0cResultStatus\x12\
     \x0c\n\x08kSuccess\x10\0\x12\r\n\tkNotFound\x10\x01\x12\x0b\n\x07kFailed\
-    \x10\x0228\n\x08KVServer\x12,\n\x05Serve\x12\x10.example.Request\x1a\x0f\
-    .example.Status\"\0b\x06proto3\
+    \x10\x022h\n\x08KVServer\x12,\n\x05Serve\x12\x10.example.Request\x1a\x0f\
+    .example.Status\"\0\x12.\n\x07GetTest\x12\x10.example.Request\x1a\x0f.ex\
+    ample.Status\"\0b\x06proto3\
 ";
 
 static mut file_descriptor_proto_lazy: ::protobuf::lazy::Lazy<::protobuf::descriptor::FileDescriptorProto> = ::protobuf::lazy::Lazy {

@@ -24,6 +24,13 @@ fn main(){
     let mut request = Request::new();
     request.set_opt(OperationType::INSERT);
     request.set_key("foo".to_string());
+    request.set_value("bar".to_string());
 
-    let check = client.serve(&request).expect("RPC Failed!");
+    let check = client.serve(&request).expect("serve failed!");
+
+    let mut request2 = Request::new();
+    request2.set_opt(OperationType::GET);
+    request2.set_key("foo".to_string());
+
+    let check = client.get_test(&request2).expect("get-test failed!");
 }
