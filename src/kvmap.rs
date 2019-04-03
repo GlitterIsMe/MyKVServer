@@ -1,82 +1,71 @@
 use std::collections::BTreeMap;
+use std::collections::btree_map::{Iter, IterMut};
 use std::sync::RwLock;
 use std::iter;
 
 #[derive(Debug, Clone)]
 pub struct MemIndex{
-    kvmap_: RwLock<BTreeMap<String, (bool, u64, String)>>,
-    entry_num_: RwLock<u64>,
-    data_memory_usage_: RwLock<u64>,
+    kvmap_: BTreeMap<String, (bool, u64, String)>,
+    entry_num_: u64,
+    data_memory_usage_: u64,
 }
 
 impl MemIndex{
     pub fn new() -> Self{
         MemIndex{
-            kvmap_: RwLock::new(BTreeMap::new()),
-            entry_num_: RwLock::new(0),
-            data_memory_usage_: RwLock::new(0),
+            kvmap_: BTreeMap::new(),
+            entry_num_: 0,
+            data_memory_usage_: 0,
         }
     }
 
-    pub fn ApproximateUsage(&self) -> u64{
-        *self.data_memory_usage_.read().unwrap()
+    pub fn approximate_usage(&self) -> u64{
+        self.data_memory_usage_
     }
 
-    pub fn EntryNum(&self) -> u64{
-        *self.entry_num_.read().unwrap()
+    pub fn entry_num(&self) -> u64{
+        self.entry_num_
     }
 
     //TODO: lock for concurrent
-    pub fn Put(&mut self, key: String, value: String) -> bool{
+    pub fn put(&mut self, key: &str, value: &str) -> bool{
 
         let key_len = key.len();
         let value_len = value.len();
-        let mut index = self.kvmap_.write().unwrap();
-        match *index.insert(key, (false, 0, value)){
+        match self.kvmap_.insert(key.to_string(), (false, 0, value.to_string())){
             Some(x) => {
-                {
-                    let mut usage = self.data_memory_usage_.write().unwrap(); 
-                    *usage -= x.len();
-                    *usage += value_len;
-                }
+                self.data_memory_usage_ -= x.2.len() as u64;
+                self.data_memory_usage_ += value_len as u64;
             },
             None => {
-                {
-                    let mut usage = self.data_memory_usage_.write().unwrap(); 
-                    *usage += (key_len + value_len);
-                }
-
-                {
-                    let mut entry = self.entry_num_.write().unwrap();
-                    self.entry += 1;
-                }
+                self.data_memory_usage_ += key_len as u64 + value_len as u64;
+                self.entry_num_ += 1;
             }
         }// match/if let/while let后面都没有分号
         true
     }
 
     //TODO: lock for concurrent
-    pub fn Get(&self, key: &str) -> Option<String>{
-        let index = self.kvmap_.read().unwrap();
-        if let Some(x) = *index.get(key){
-            match x.0 {
-                kValueType => Some(x.1.clone()),
-                kDeletionType => None,
-            }
+    pub fn get(&self, key: &str) -> Option<String>{
+        if let Some(x) = self.kvmap_.get(key){
+            return Some(x.2.clone());
         }
         None
     }
 
-    pub fn Delete(&mut self, key: &str){
-        let mut index = self.kvmap_.write().unwrap();
-        index.remove(key);
+    pub fn delete(&mut self, key: &str){
+        self.kvmap_.remove(key);
     }
 
-    pub fn NewIter(&self) -> Iterator<String, String>{
-        self.kvmap_.read().unwrap().iter()
-    }
+    pub fn new_iter(&self) -> Iter<String, (bool, u64, String)>{
+        self.kvmap_.iter()
+    } 
 
-    pub fn Clear(){
-        self.kvmap_.write().unwrap().clear();
+    pub fn new_iter_mut(&mut self) -> IterMut<String, (bool, u64, String)>{
+        self.kvmap_.iter_mut()
+    } 
+
+    pub fn clear(&mut self){
+        self.kvmap_.clear();
     }
 }

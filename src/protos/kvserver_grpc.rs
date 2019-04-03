@@ -25,13 +25,6 @@ const METHOD_KV_SERVER_SERVE: ::grpcio::Method<super::kvserver::Request, super::
     resp_mar: ::grpcio::Marshaller { ser: ::grpcio::pb_ser, de: ::grpcio::pb_de },
 };
 
-const METHOD_KV_SERVER_GET_TEST: ::grpcio::Method<super::kvserver::Request, super::kvserver::Status> = ::grpcio::Method {
-    ty: ::grpcio::MethodType::Unary,
-    name: "/example.KVServer/GetTest",
-    req_mar: ::grpcio::Marshaller { ser: ::grpcio::pb_ser, de: ::grpcio::pb_de },
-    resp_mar: ::grpcio::Marshaller { ser: ::grpcio::pb_ser, de: ::grpcio::pb_de },
-};
-
 #[derive(Clone)]
 pub struct KvServerClient {
     client: ::grpcio::Client,
@@ -59,22 +52,6 @@ impl KvServerClient {
     pub fn serve_async(&self, req: &super::kvserver::Request) -> ::grpcio::Result<::grpcio::ClientUnaryReceiver<super::kvserver::Status>> {
         self.serve_async_opt(req, ::grpcio::CallOption::default())
     }
-
-    pub fn get_test_opt(&self, req: &super::kvserver::Request, opt: ::grpcio::CallOption) -> ::grpcio::Result<super::kvserver::Status> {
-        self.client.unary_call(&METHOD_KV_SERVER_GET_TEST, req, opt)
-    }
-
-    pub fn get_test(&self, req: &super::kvserver::Request) -> ::grpcio::Result<super::kvserver::Status> {
-        self.get_test_opt(req, ::grpcio::CallOption::default())
-    }
-
-    pub fn get_test_async_opt(&self, req: &super::kvserver::Request, opt: ::grpcio::CallOption) -> ::grpcio::Result<::grpcio::ClientUnaryReceiver<super::kvserver::Status>> {
-        self.client.unary_call_async(&METHOD_KV_SERVER_GET_TEST, req, opt)
-    }
-
-    pub fn get_test_async(&self, req: &super::kvserver::Request) -> ::grpcio::Result<::grpcio::ClientUnaryReceiver<super::kvserver::Status>> {
-        self.get_test_async_opt(req, ::grpcio::CallOption::default())
-    }
     pub fn spawn<F>(&self, f: F) where F: ::futures::Future<Item = (), Error = ()> + Send + 'static {
         self.client.spawn(f)
     }
@@ -82,7 +59,6 @@ impl KvServerClient {
 
 pub trait KvServer {
     fn serve(&mut self, ctx: ::grpcio::RpcContext, req: super::kvserver::Request, sink: ::grpcio::UnarySink<super::kvserver::Status>);
-    fn get_test(&mut self, ctx: ::grpcio::RpcContext, req: super::kvserver::Request, sink: ::grpcio::UnarySink<super::kvserver::Status>);
 }
 
 pub fn create_kv_server<S: KvServer + Send + Clone + 'static>(s: S) -> ::grpcio::Service {
@@ -90,10 +66,6 @@ pub fn create_kv_server<S: KvServer + Send + Clone + 'static>(s: S) -> ::grpcio:
     let mut instance = s.clone();
     builder = builder.add_unary_handler(&METHOD_KV_SERVER_SERVE, move |ctx, req, resp| {
         instance.serve(ctx, req, resp)
-    });
-    let mut instance = s.clone();
-    builder = builder.add_unary_handler(&METHOD_KV_SERVER_GET_TEST, move |ctx, req, resp| {
-        instance.get_test(ctx, req, resp)
     });
     builder.build()
 }

@@ -3,11 +3,11 @@ extern crate grpcio;
 extern crate protos;
 
 use std::io::Read;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::{io, thread};
-use std::collections::BTreeMap;
-use::std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::iter;
+use std::collections::VecDeque;
 
 use futures::sync::oneshot;
 use futures::Future;
@@ -20,7 +20,7 @@ mod kvmap;
 use self::kvmap::MemIndex;
 
 mod myio;
-use self::myio::builder::PersistToFile;
+use self::myio::builder::persist_to_file;
 
 mod env;
 use self::env::Env;
@@ -33,9 +33,9 @@ struct KVServerService{
     // total number of kv entries
     //entry_num_: u64,
     // in memory index of kv items
-    main_buffer_: Option<Box<MemIndex>>,
+    main_buffer_: Arc<RwLock<MemIndex>>,
     // work when the main buffer is been persisted
-    sub_buffer_: Option<Box<MemIndex>>,
+    sub_buffer_: Arc<RwLock<MemIndex>>,
     // newest version of persist data
     latest_persistent_version_: u64,
     // whether the main buffer is been persisted
@@ -46,9 +46,11 @@ struct KVServerService{
 
     bg_working_: Arc<AtomicBool>,
 
-    system_stall_: Arc<(Mutex<bool>, Condvar)>,
+    system_stall_: Arc<AtomicBool>,
 
     cv_: Arc<(Mutex<bool>, Condvar)>,
+
+    bg_task_queue_: Arc<Mutex<VecDeque<(fn(Arc<RwLock<MemIndex>>, u64),Arc<RwLock<MemIndex>>, u64)>>>,
 
     env_: Env,
 }//struct声明后面不要分号
@@ -56,30 +58,12 @@ struct KVServerService{
 impl KvServer for KVServerService{
     fn serve(&mut self, ctx: RpcContext, request: Request, sink: UnarySink<Status>){
         println!("get a kv item {:?}", request);
-        let result = self.ExcuteOpt(&request);
+        let result = self.excute_opt(&request);
         let f = sink
             .success(result.clone())
             .map(move |_| println!("Responded with result"))
             .map_err(move |err| eprintln!("Failed to reply: {:?}", err));
         ctx.spawn(f)
-    }
-
-    fn get_test(&mut self, ctx: RpcContext, request: Request, sink: UnarySink<Status>){
-        let mut result = Status::new();
-        //println!("map len is {} and {} entries", self.kvmap.len(), self.entry_num);
-        //let addr = self as *const Self as usize;
-        //println!("self addr is 0x{:X}", addr);
-        //result.set_status(ResultStatus::kNotFound);
-        /* if let Some(x) = self.kvmap.get(&request.key){
-            println!("get {}", x);
-            result.set_value(x.to_string());// 返回一个String？
-            result.set_status(ResultStatus::kSuccess);
-        } */
-        let f = sink
-            .success(result.clone())
-            .map(move |_| println!("Responded with result"))
-            .map_err(move |err| eprintln!("Failed to reply: {:?}", err));
-        ctx.spawn(f) 
     }
 }
 
@@ -88,39 +72,50 @@ impl KvServer for KVServerService{
 
     pub fn new() -> KVServerService{
         KVServerService{
-            entry_num_ : 0,
-            main_buffer_: Some(Box::new(MemIndex::new())),
-            sub_buffer_: Some(Box::new(MemIndex::new())),
+            //entry_num_ : 0,
+            main_buffer_: Arc::new(RwLock::new(MemIndex::new())),
+            sub_buffer_: Arc::new(RwLock::new(MemIndex::new())),
             latest_persistent_version_: 1,
             persistent_working_: Arc::new(AtomicBool::new(false)),
             system_working_: Arc::new(AtomicBool::new(true)),
             bg_working_: Arc::new(AtomicBool::new(false)),
-            system_stall_: Arc::new((Mutex::new(false), Condvar::new())),
+            system_stall_: Arc::new(AtomicBool::new(false)),
             cv_: Arc::new((Mutex::new(false), Condvar::new())), 
+            bg_task_queue_: Arc::new(Mutex::new(VecDeque::new())),
             env_: Env::new(),
         }
     }
 
-    pub fn ExcuteOpt(&mut self, request: &Request) -> Status{
+    pub fn excute_opt(&mut self, request: &Request) -> Status{
         let mut result = Status::new();
         match request.opt{
             OperationType::INSERT =>{
                 //self.entry_num += 1;// Rust没有++和--
-                self.Put(request.key, request.value);
+                // request本身是borrow的，这里所有权不能转移
+                self.put(&request.key, &request.value);
                 //println!("self addr is 0x{:X}", self as *const Self as usize);
+                println!("put [{}-{}]", &request.key, &request.value);
+                println!("entry num {}", self.main_buffer_.read().unwrap().entry_num());
                 result.set_status(ResultStatus::kSuccess);
             },
 
             OperationType::GET => {
                 result.set_status(ResultStatus::kNotFound);
-                if let Some(x) = self.Get(&request.key){
-                    result.set_value(x.to_string());// 返回一个String？
-                    result.set_status(ResultStatus::kSuccess);
+                match self.get(&request.key){
+                    Some(x) =>{
+                        println!("get [{}-{}]", &request.key, &x);
+                        result.set_value(x.to_string());// 返回一个String？
+                        result.set_status(ResultStatus::kSuccess);
+                    },
+                    None =>{
+                        println!("Not Found");
+                    },
                 }
             },
 
             OperationType::DELETE => {
-                self.Delete(&request.key);
+                self.delete(&request.key);
+                println!("entry num {}", self.main_buffer_.read().unwrap().entry_num());
                 result.set_status(ResultStatus::kSuccess);
             },
 
@@ -129,7 +124,8 @@ impl KvServer for KVServerService{
             },
 
             OperationType::PERSIST =>{
-                self.Persist();
+                println!("persist call");
+                self.persist();
                 result.set_status(ResultStatus::kSuccess);
             },
 
@@ -141,146 +137,123 @@ impl KvServer for KVServerService{
         result
     }
 
-    pub fn Put(&mut self, key: String, value: String) -> bool{
-        let mut buffer_to_insert = None;
+    pub fn put(&mut self, key: &str, value: &str) -> bool{
         {
-            let system_stall_clone = self.system_stall_.clone();
-            let &(mu_ref, cv_ref) = &*system_stall_clone;
-            let mut stalling = mu_ref.lock().unwrap();
-            while *stalling {
-                stalling = cv_ref.wait(stalling).unwrap();
-            }
-            stalling = false;
+            let stalling = self.system_stall_.clone();
+            while stalling.load(Ordering::SeqCst){/*wait*/}
         }
     
         let persistent_working_clone = self.persistent_working_.clone();
         if !persistent_working_clone.load(Ordering::SeqCst) {
-            buffer_to_insert = self.main_buffer_;
+            self.main_buffer_.write().unwrap().put(key, value);
         }else{
-            buffer_to_insert = self.sub_buffer_;
+            self.sub_buffer_.write().unwrap().put(key, value);
         }
-        // TODO : use mutex to protect buffer under multithread
-        if let Some(x) = buffer_to_insert{
-            x.Put(key, value);
-        }
-        false
+        true
     }
 
-    pub fn Get(&self, key: &str) -> Option<String>{
+    pub fn get(&self, key: &str) -> Option<String>{
         {
-            let system_stall_clone = self.system_stall_.clone();
-            let &(mu_ref, cv_ref) = &*system_stall_clone;
-            let mut stalling = mu_ref.lock().unwrap();
-            while *stalling {
-                stalling = cv_ref.wait(stalling).unwrap();
+            let stalling = self.system_stall_.clone();
+            while stalling.load(Ordering::SeqCst){/*wait*/}
+        }
+        // get from main firstly
+        if let Some(x) = self.main_buffer_.read().unwrap().get(key){
+                return Some(x);
             }
-            stalling = false;
-        }
-        // get from mem firstly
-        if let Some(x) = self.main_buffer_{
-            x.Get(key)
-        }
-        // get from imm secondly
-        if let Some(x) = self.sub_buffer_{
-            if x.len() > 0{
-                x.Get(key)
+        if self.sub_buffer_.read().unwrap().entry_num() != 0{
+            // get from sub secondly
+            if let Some(x) = self.sub_buffer_.read().unwrap().get(key){
+                return Some(x);
             }
         }
+        None
     }
 
-    pub fn Delete(&mut self, key: &str){
+    pub fn delete(&mut self, key: &str){
         {
-            let system_stall_clone = self.system_stall_.clone();
-            let &(mu_ref, cv_ref) = &*system_stall_clone;
-            let mut stalling = mu_ref.lock().unwrap();
-            while *stalling {
-                stalling = cv_ref.wait(stalling).unwrap();
-            }
-            stalling = false;
+            let stalling = self.system_stall_.clone();
+            while stalling.load(Ordering::SeqCst){/*wait*/}
         }
-
         // delete from mem firstly
-        if let Some(x) = self.main_buffer_{
-            x.Delete(key)
-        }
-        // delete from imm secondly
-        if let Some(x) = self.sub_buffer_{
-            x.Delete(key)
+        self.main_buffer_.write().unwrap().delete(key);
+        if self.sub_buffer_.read().unwrap().entry_num() != 0{
+            // delete from sub secondly
+            self.sub_buffer_.write().unwrap().delete(key);
         }
     }
 
-    pub fn NewIter(&self) -> Iterator<String, String>{
-
+    pub fn new_iter(&self){
+       
     }
 
-    pub fn Persist(&mut self){
+    pub fn persist(&mut self){
         let mut bg_wk_clone = self.bg_working_.clone();
         if !bg_wk_clone.load(Ordering::SeqCst) {
-            thread::spawn(|| {
-                self.BackgroundThreadEntryPoint(self);
+            let sys_working_clone = self.system_working_.clone();
+            println!("sysworking {}", sys_working_clone.load(Ordering::SeqCst));
+            let cv_clone = self.cv_.clone();
+            let queue_clone = self.bg_task_queue_.clone();
+            let persistent_working_clone = self.persistent_working_.clone();
+            let main_buf = self.main_buffer_.clone();
+            let sub_buf = self.sub_buffer_.clone();
+            let start_stall = self.system_stall_.clone();
+            thread::spawn(move| | {
+                println!("spawn persist thread");
+                loop{
+                    let &(ref mu, ref cv) = &*cv_clone;
+                    let mut process = mu.lock().unwrap();
+                    while !*process {
+                        //触发process的时候开始执行persistent
+                        println!("wait for awaking");
+                        process = cv.wait(process).unwrap();
+                    }
+                    println!("persist process");
+                    if let Some(x) = queue_clone.lock().unwrap().pop_front(){
+                        let (func, index, ver) = x;
+                        persistent_working_clone.store(true, Ordering::SeqCst);
+                        // persist data in main buffer to file in increments
+                        func(index, ver);
+                        // move data in subbuffer to main buffer
+                        // systemt will stall in this period
+                        if sub_buf.read().unwrap().entry_num() > 0 {
+                            start_stall.store(true, Ordering::SeqCst);
+                            for (key, value) in main_buf.read().unwrap().new_iter(){
+                                main_buf.write().unwrap().put(&key, &value.2);
+                            }
+                            sub_buf.write().unwrap().clear();
+                            start_stall.store(false, Ordering::SeqCst);            
+                        }
+                        persistent_working_clone.store(false, Ordering::SeqCst);
+                    }
+                    *process = false;
+                    if !sys_working_clone.load(Ordering::SeqCst){
+                        println!("exit persist thread");
+                        break;
+                    }
+                }
             });
             bg_wk_clone.store(true, Ordering::SeqCst);
         }
-        let &(mu_ref, cv_ref) = &*self.cv_.clone();
-        let mut start = mu_ref.lock.unwrap();
+        let queue_clone_main = self.bg_task_queue_.clone();
+        queue_clone_main.lock().unwrap().push_back((persist_to_file, self.main_buffer_.clone(), self.latest_persistent_version_));
+        self.latest_persistent_version_ += 1;
+        let &(ref mu, ref cv) = &*self.cv_.clone();
+        let mut start = mu.lock().unwrap();
         *start = true;
-        cv_ref.notify_one(); 
+        println!("persist triggr");
+        cv.notify_one(); 
     }
-
-    fn BackgroundThreadEntryPoint(server: KVServerService){
-        server.BgWorkMain();
-    }
-
-    fn BgWorkMain(&mut self){
-        let sys_working_clone = self.system_working_.clone();
-        let cv_clone = self.cv_.clone();
-        while sys_working_clone.load(Ordering::SeqCst) {
-            let &(ref_mtx, ref_cv) = &*cv_clone;
-            let mut process = ref_mtx.lock().unwrap();
-            while !*process {
-                //触发process的时候开始执行persistent
-                process = ref_cv.wait(process).unwrap();
-            }
-            self.BGPersist();
-            *process = false;
-        }
-    }
-
-    fn BGPersist(&mut self){
-        let system_stall_clone = self.system_stall.clone();
-        let persistent_working_clone = self.persistent_working_.clone();
-        // handle by background thread
-        persistent_working_clone.store(true, Ordering::SeqCst);
-        // persist data in main buffer to file in increments
-        if let Some(x) = self.main_buffer_{
-            PersistToFile(x.NewIter(), self.latest_persistent_version_);
-            self.latest_persistent_version_ += 1;
-        }
-        // move data in subbuffer to main buffer
-        // systemt will stall in this period
-        if let Some(x) = self.sub_buffer_{
-            if x.len() > 0 {
-                system_stall_clone.store(true, Ordering::SeqCst);
-                if let Some(x) = self.main_buffer_{
-                    for (key, value) in x.NewIter(){
-                        x.Put(key, value.2);
-                    }
-                }
-                x.Clear();
-                system_stall_clone.store(false, Ordering::SeqCst);
-            }
-        }
-        persistent_working_clone.store(false, Ordering::SeqCst);
-    }
-} 
+ }
 
 impl Drop for KVServerService{
     //pub fn Drop(&mut self){
     //impl trait不需要加pub，因为在定义里面已经有了
     fn drop(&mut self){
-        let mut working = self.system_working_.clone();
-        working.store(false, Ordering::SeqCst);
-    }
+        println!("shutdown and drop");
+        //let mut working = self.system_working_.clone();
+        //working.store(false, Ordering::SeqCst);
+    } 
 }
 
 

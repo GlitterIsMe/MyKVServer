@@ -11,7 +11,7 @@ impl Env{
             file_number_: 0,
         }
     }
-    pub fn GetFileName(&mut self) -> String{
+    pub fn get_file_name(&mut self) -> String{
         self.file_number_ += 1;
         format!("{}.df",self.file_number_)
     }
